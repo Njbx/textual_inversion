@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-04
+  base_learning_rate: 7.0e-03
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     linear_start: 0.00085
@@ -23,7 +23,7 @@ model:
         placeholder_strings: ["*"]
         initializer_words: ["sculpture"]
         per_image_tokens: false
-        num_vectors_per_token: 1
+        num_vectors_per_token: 8
         progressive_words: False
         
     unet_config:
