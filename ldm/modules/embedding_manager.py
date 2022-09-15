@@ -9,13 +9,24 @@ DEFAULT_PLACEHOLDER_TOKEN = ["*"]
 
 PROGRESSIVE_SCALE = 2000
 
-def get_clip_token_for_string(tokenizer, string):
-    batch_encoding = tokenizer(string, truncation=True, max_length=77, return_length=True,
-                               return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
-    tokens = batch_encoding["input_ids"]
-#    assert torch.count_nonzero(tokens - 49407) == 2, f"String '{string}' maps to more than a single token. Please use another string"
+def get_clip_tokens_for_string(tokenizer, string, num_vectors_per_token):
+    batch_encoding = tokenizer(
+        string,
+        truncation=True,
+        max_length=77,
+        return_length=True,
+        return_overflowing_tokens=False,
+        padding='max_length',
+        return_tensors='pt',
+    )
+    tokens = batch_encoding['input_ids']
 
-    return tokens[0, 1]
+    count = torch.count_nonzero(tokens - 49407) # remove the 49407 blank filler tokens
+    assert ( count >= 2 ), f"String '{string}' maps to {count-1} tokens and needs 1"
+    assert ( num_vectors_per_token % (count-1) == 0 ), f"String '{string}' maps to {count-1} tokens and needs to divide equally into {num_vectors_per_token}"
+    print(f'count = {count}')
+    
+    return torch.narrow(tokens, 1, 1, count-1) # ignore the first token, because it is the 49406 start of command?
 
 def get_bert_token_for_string(tokenizer, string):
     token = tokenizer(string)
@@ -68,17 +79,18 @@ class EmbeddingManager(nn.Module):
             placeholder_strings.extend(per_img_token_list)
 
         for idx, placeholder_string in enumerate(placeholder_strings):
-            
-            token = get_token_for_string(placeholder_string)
+            token = get_clip_token_for_string(embedder.tokenizer, placeholder_string)
 
             if initializer_words and idx < len(initializer_words):
-                init_word_token = get_token_for_string(initializer_words[idx])
+                init_word_tokens = get_clip_tokens_for_string(embedder.tokenizer, initializer_words[idx], num_vectors_per_token)
+                num_tokens = torch.count_nonzero(init_word_tokens)
+                print(f'num tokens={num_tokens}')
 
                 with torch.no_grad():
-                    init_word_embedding = get_embedding_for_tkn(init_word_token.cpu())
+                    init_word_embeddings = get_embeddings_for_clip_tokens(embedder.transformer.text_model.embeddings, init_word_tokens.cpu() )
 
-                token_params = torch.nn.Parameter(init_word_embedding.unsqueeze(0).repeat(num_vectors_per_token, 1), requires_grad=True)
-                self.initial_embeddings[placeholder_string] = torch.nn.Parameter(init_word_embedding.unsqueeze(0).repeat(num_vectors_per_token, 1), requires_grad=False)
+                token_params = torch.nn.Parameter( init_word_embeddings.repeat( int(num_vectors_per_token / num_tokens), 1 ), requires_grad=True, )
+                self.initial_embeddings[placeholder_string] = torch.nn.Parameter(init_word_embeddings.repeat(int(num_vectors_per_token / num_tokens), 1), requires_grad=False, )
             else:
                 token_params = torch.nn.Parameter(torch.rand(size=(num_vectors_per_token, token_dim), requires_grad=True))
             
